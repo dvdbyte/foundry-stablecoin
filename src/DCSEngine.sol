@@ -31,9 +31,15 @@ contract DSCEngine is ReentrancyGuard {
     error DCEngine__TokenAddressesAndPriceFeedAddressesMustBeSameLength();
     error DCCEngine__NotAllowedToken();
     error DSCEngine__TransferFailed();
+    error DSCEngine__BreaksHealthFactor(uint256 userHealthFactor);
+    error DSCEngine__MintFailed();
+       
 
     uint256 private constant ADDITIONAL_FEED_PRECISION = 1e10;
     uint256 private constant PRECISION = 1e18;
+    uint256 private constant LIQUIDATION_TRESHOLD = 50;
+    uint256 private constant LIQUIDATION_PRECISION = 100;
+    uint256 private constant MIN_HEALTH_FACTOR = 1;
     
 
     mapping(address token => address priceFeeds) private s_priceFeeds;
@@ -99,7 +105,6 @@ contract DSCEngine is ReentrancyGuard {
 
     }
 
-  
     function redeemCollateralForDsc() external {}
 
     function redeemCollateral() external {}
@@ -114,6 +119,10 @@ contract DSCEngine is ReentrancyGuard {
       s_DSCMinted[msg.sender] += amountDscToMint;
       // If they minted too much
       _revertIfHealthFactorIsBroken(msg.sender);
+      bool minted = i_dsc.mint(msg.sender, amountDscToMint);
+      if(!minted) {
+        revert DSCEngine__MintFailed();
+      }
     }
 
     function burnDsc() external {}
@@ -139,13 +148,18 @@ contract DSCEngine is ReentrancyGuard {
     function _healthFactor(address user) internal view returns(uint256) {
 
       (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
-
-
+      uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_TRESHOLD) / LIQUIDATION_PRECISION;
+        return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
     }
 
-    function  _revertIfHealthFactorIsBroken(address user) internal view {
-        // 1. Chech health factor (do they have enough collateral?)
+       // 1. Chech health factor (do they have enough collateral?)
         // 2. Revert if they don't
+    function  _revertIfHealthFactorIsBroken(address user) internal view {
+     
+       uint256 userHealthFactor = _healthFactor(user);
+       if (userHealthFactor < MIN_HEALTH_FACTOR) {
+        revert DSCEngine__BreaksHealthFactor(userHealthFactor);
+       }
      }
 
     ///////////////////////////////////////////
